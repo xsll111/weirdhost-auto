@@ -1,68 +1,59 @@
-name: 自动增加服务器时间
+name: Weirdhost Auto Renew
 
 on:
-  workflow_dispatch: # 允许在 Actions 页面手动触发此工作流，方便测试
   schedule:
-    # 使用 CRON 表达式定义定时任务，所有时间均为 UTC 时间。
-    # '0 4 * * *' 表示在 UTC 时间的每天凌晨4点执行。
-    # 如果您位于东八区（如北京时间），这对应您本地时间的每天中午12点。
-    # 如果您在其他时区，请相应调整。例如东九区（东京/首尔时间）中午12点是UTC时间3点，应为 '0 3 * * *'。
-    - cron: '30 19 * * *'
+    - cron: '0 10 * * *'  # 每天 UTC 1:00 (北京时间 9:00) 运行
+  workflow_dispatch:     # 允许手动触发
 
 jobs:
-  add_time:
-    runs-on: ubuntu-latest # 在最新的 Ubuntu 环境上运行
-
+  login-test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30  # 设置30分钟超时，避免GitHub Actions默认6小时太长
+    
+    # 授予工作流写入仓库内容的权限
+    permissions:
+      contents: write
+    
     steps:
-      - name: Checkout repository # 步骤1: 检出（下载）你的代码到运行环境中
-        uses: actions/checkout@v4
-
-      - name: Set up Python # 步骤2: 设置 Python 环境
-        uses: actions/setup-python@v5
-        with:
-          python-version: '3.x' # 使用最新的 Python 3
-
-      - name: Install Playwright and dependencies # 步骤3: 安装 Playwright 及其浏览器依赖
-        run: |
-          pip install playwright
-          playwright install --with-deps chromium # 安装 Chromium 浏览器及其运行所需的所有依赖
-
-      - name: Run Time Adder Script # 步骤4: 运行你的 Python 脚本
-        env:
-          # 从 GitHub Secrets 读取环境变量，这些值绝不会在日志中明文显示
-          # 优先使用 Cookie 登录
-          REMEMBER_WEB_COOKIE: ${{ secrets.REMEMBER_WEB_COOKIE }}
-          # 如果 Cookie 失效或未设置，则使用下面的邮箱和密码
-          PTERODACTYL_EMAIL: ${{ secrets.PTERODACTYL_EMAIL }}
-          PTERODACTYL_PASSWORD: ${{ secrets.PTERODACTYL_PASSWORD }}
-        run: python main.py
-
-      - name: Upload error artifacts # 步骤5: 如果脚本运行失败，上传截图用于调试
-        if: failure() # 仅在上一步失败时运行
-        uses: actions/upload-artifact@v4
-        with:
-          name: error-screenshots # 上传后的文件包名称
-          path: "*.png" # 上传所有以 .png 结尾的文件
-
-      - name: Commit time.txt to repo
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
-
-          if [ ! -f time.txt ]; then
-            echo "首次生成时间：$(date +'%Y-%m-%d %H:%M:%S')" > time.txt
-          else
-            echo "$(date +'%Y-%m-%d %H:%M:%S')" > time.txt
-          fi
-
-          git add time.txt
-
-          if git diff --cached --quiet
-          then
-            echo "无变化，无需提交"
-          else
-            git commit -m "⏱️ 更新时间文件: $(date +'%Y-%m-%d %H:%M:%S')"
-            git push origin HEAD:main
-          fi
+    - name: Checkout repository
+      uses: actions/checkout@v4
+      
+    - name: Setup Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.11'
+        
+    - name: Install dependencies
+      run: |
+        pip install playwright
+        playwright install chromium
+          
+    - name: Set up WARP
+      uses: fscarmen/warp-on-actions@v1.4
+      with:
+        stack: dual        # Optional. Support [ ipv4, ipv6, dual ]. Default is dual.
+        mode: wireguard    # Optional. Support [ wireguard, client ]. Default is wireguard.   
+      
+    - name: Run auto renewal
+      env:
+        REMEMBER_WEB_COOKIE: ${{ secrets.REMEMBER_WEB_COOKIE }}
+        WEIRDHOST_EMAIL: ${{ secrets.WEIRDHOST_EMAIL }}
+        WEIRDHOST_PASSWORD: ${{ secrets.WEIRDHOST_PASSWORD }}
+        WEIRDHOST_SERVER_URLS: ${{ secrets.WEIRDHOST_SERVER_URLS }}
+      run: python main.py
+      
+    - name: Commit README file
+      run: |
+        git config user.name "github-actions[bot]"
+        git config user.email "github-actions[bot]@users.noreply.github.com"
+        
+        # 添加README文件
+        git add README.md
+        
+        # 检查是否有变化需要提交
+        if git diff --cached --quiet; then
+          echo "README文件无变化，无需提交"
+        else
+          git commit -m "📝 更新运行状态: $(date +'%Y-%m-%d %H:%M:%S')"
+          git push origin HEAD:main
+        fi
